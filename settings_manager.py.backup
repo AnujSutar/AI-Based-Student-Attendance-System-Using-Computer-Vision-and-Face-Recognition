@@ -1,0 +1,59 @@
+"""Persistent application settings stored locally in SQLite."""
+
+from config import CAMERA_INDEX, DUPLICATE_INTERVAL_MINUTES, LOW_ATTENDANCE_THRESHOLD, MAX_RECOGNITION_DISTANCE
+from database import get_connection
+
+
+DEFAULT_SETTINGS = {
+    "app_name": "AI-Based Student Attendance System",
+    "camera_index": str(CAMERA_INDEX),
+    "max_recognition_distance": str(MAX_RECOGNITION_DISTANCE),
+    "duplicate_interval_minutes": str(DUPLICATE_INTERVAL_MINUTES),
+    "low_attendance_threshold": str(LOW_ATTENDANCE_THRESHOLD),
+}
+
+
+def initialize_settings() -> None:
+    with get_connection() as connection:
+        for key, value in DEFAULT_SETTINGS.items():
+            connection.execute(
+                "INSERT OR IGNORE INTO application_settings (setting_key, setting_value) VALUES (?, ?)",
+                (key, value),
+            )
+
+
+def get_settings() -> dict[str, str]:
+    initialize_settings()
+    with get_connection() as connection:
+        rows = connection.execute("SELECT setting_key, setting_value FROM application_settings").fetchall()
+    stored = {row["setting_key"]: row["setting_value"] for row in rows}
+    return {**DEFAULT_SETTINGS, **stored}
+
+
+def update_settings(settings: dict[str, str]) -> tuple[bool, str]:
+    """Validate and persist configurable settings."""
+    try:
+        camera_index = int(settings["camera_index"])
+        max_distance = float(settings["max_recognition_distance"])
+        duplicate_interval = int(settings["duplicate_interval_minutes"])
+        low_threshold = float(settings["low_attendance_threshold"])
+    except (KeyError, TypeError, ValueError):
+        return False, "Settings must contain valid numeric values."
+    if camera_index < 0 or not 0 < max_distance <= 100 or duplicate_interval < 1 or not 0 <= low_threshold <= 100:
+        return False, "Enter valid values for all settings."
+
+    values = {
+        "app_name": settings["app_name"].strip() or DEFAULT_SETTINGS["app_name"],
+        "camera_index": str(camera_index),
+        "max_recognition_distance": str(max_distance),
+        "duplicate_interval_minutes": str(duplicate_interval),
+        "low_attendance_threshold": str(low_threshold),
+    }
+    with get_connection() as connection:
+        for key, value in values.items():
+            connection.execute(
+                "INSERT INTO application_settings (setting_key, setting_value) VALUES (?, ?) "
+                "ON CONFLICT(setting_key) DO UPDATE SET setting_value = excluded.setting_value",
+                (key, value),
+            )
+    return True, "Settings saved successfully."
